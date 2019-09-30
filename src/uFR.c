@@ -101,6 +101,16 @@ sz_ptr GetDlTypeName(uint8_t dl_type_code) {
 			return "DL_NTAG_216";
 		case DL_MIKRON_MIK640D:
 			return "DL_MIKRON_MIK640D";
+		case NFC_T2T_GENERIC:
+			return "NFC_T2T_GENERIC";
+		case DL_NT3H_1101:
+			return "DL_NT3H_1101";
+		case DL_NT3H_1201:
+			return "DL_NT3H_1201";
+		case DL_NT3H_2111:
+			return "DL_NT3H_2111";
+		case DL_NT3H_2211:
+			return "DL_NT3H_2211";
 		case DL_MIFARE_MINI:
 			return "DL_MIFARE_MINI";
 		case DL_MIFARE_CLASSIC_1K:

@@ -49,9 +49,12 @@ void page_write(void);
 void linear_read(void);
 void linear_write(void);
 void key_write(void);
+bool open_sam(void);
+void SamStoreKey(void);
 //------------------------------------------------------------------------------
 
 bool card_transceive_mode = false;
+bool sam_used = false;
 
 int main(void)
 {
@@ -61,30 +64,56 @@ int main(void)
 	uint8_t sak, uid_size, uid[10];
 	UFR_STATUS status;
 
-	usage();
-	printf(" --------------------------------------------------\n");
-	printf("     Please wait while opening uFR NFC reader.\n");
-	printf(" --------------------------------------------------\n");
-
-#ifdef __DEBUG
-	status = ReaderOpenEx(1, PORT_NAME, 1, NULL);
-#else
+	int mode = 0;
+	printf("\nSelect reader opening mode:\n");
+	printf(" (1) - Simple Reader Open\n");
+	printf(" (2) - Advanced Reader Open\n");
+	scanf("%d", &mode);
+	fflush(stdin);
+	if (mode == 1){
 	status = ReaderOpen();
-#endif
-	if (status != UFR_OK)
+	} else if (mode == 2){
+	   uint32_t reader_type = 1;
+	   char port_name[1024] = "";
+	   uint32_t port_interface = 2;
+	   char open_args[1024] = "";
+	   char str_interface[2] = "";
+
+	   printf("Enter reader type:\n");
+	   scanf("%d", &reader_type);
+	   fflush(stdin);
+
+	   printf("Enter port name:\n");
+	   scanf("%s", port_name);
+	   fflush(stdin);
+
+	   printf("Enter port interface:\n");
+	   scanf("%s", str_interface);
+	   if (str_interface[0] == 'U'){
+		   port_interface = 85;
+	   } else if (str_interface[0] == 'T'){
+		   port_interface = 84;
+	   } else{
+		   port_interface = atoi(str_interface);
+	   }
+
+	   fflush(stdin);
+
+	   printf("Enter additional argument:\n");
+	   scanf("%s", open_args);
+	   fflush(stdin);
+
+	   status = ReaderOpenEx(reader_type, port_name, port_interface, open_args);
+
+
+	}
+	else
 	{
-		printf("Error while opening device, status is: 0x%08X\n", status);
+		printf("Invalid input. Press any key to quit the application...");
 		getchar();
 		return EXIT_FAILURE;
 	}
-//	status = ReaderReset();
-//	if (status != UFR_OK)
-//	{
-//		ReaderClose();
-//		printf("Error while opening device, status is: 0x%08X\n", status);
-//		getchar();
-//		return EXIT_FAILURE;
-//	}
+
 #if __WIN32 || __WIN64
 	Sleep(500);
 #else // if linux || __linux__ || __APPLE__
@@ -102,6 +131,7 @@ int main(void)
 	printf("        uFR NFC reader successfully opened.\n");
 	printf(" --------------------------------------------------\n");
 
+	usage();
 #if linux || __linux__ || __APPLE__
 	_initTermios(0);
 #endif
@@ -202,6 +232,10 @@ void menu(char key)
 			key_write();
 			break;
 
+		case '8':
+			SamStoreKey();
+			break;
+
 		case '\x1b':
 			break;
 
@@ -220,13 +254,14 @@ void usage(void)
 			   " +------------------------------------------------+\n"
 			   "                              For exit, hit escape.\n");
 		printf(" --------------------------------------------------\n");
-		printf("  (1) - Authentication with 3DES key\n"
+		printf("  (1) - External authentication with 3DES key (card halt disable)\n"
 			   "  (2) - Card halt enable\n"
 			   "  (3) - Read Page\n"
 			   "  (4) - Write Page\n"
 			   "  (5) - Linear Read\n"
 			   "  (6) - Linear Write\n"
-			   "  (7) - Enter 3DES key into card\n");
+			   "  (7) - Enter 3DES key into card\n"
+			   "  (8) - Writing keys into SAM\n");
 }
 //------------------------------------------------------------------------------
 UFR_STATUS NewCardInField(uint8_t sak, uint8_t *uid, uint8_t uid_size)
@@ -399,133 +434,346 @@ void enable_card_halt(void)
 void page_read(void)
 {
 	UFR_STATUS status;
-	int page_nr_int;
-	uint8_t page_nr;
+	int page_nr_int, key_index_int;
+	uint8_t page_nr, key_index;
 	uint8_t data[16];
+	char key;
 
 	printf(" -------------------------------------------------------------------\n");
 	printf("                        Page data read                              \n");
 	printf(" -------------------------------------------------------------------\n");
 
-	printf("\nEnter page number (0 - 43)\n");
-	scanf("%d%*c", &page_nr_int);
-	page_nr = page_nr_int;
+	printf("\nEnter authentication mode\n"
+			" (1) - No authentication\n"
+			" (2) - SAM AES key authentication\n"
+			);
 
-	status = BlockRead(data, page_nr, T2T_WITHOUT_PWD_AUTH, 0);
+	while (!_kbhit())
+			;
+	key = _getch();
 
-	if(status)
+	if(key == '1')
 	{
-		printf("\nPage read failed\n");
-		printf("Error code = %02X\n", status);
+		printf("\nEnter page number (0 - 43)\n");
+		scanf("%d%*c", &page_nr_int);
+		page_nr = page_nr_int;
+
+		status = BlockRead(data, page_nr, T2T_WITHOUT_PWD_AUTH, 0);
+
+		if(status)
+		{
+			printf("\nPage read failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nPage read successful\n");
+			printf("Data = ");
+			print_hex_ln(data, 4, " ");
+			printf("\n");
+		}
+	}
+	else if(key == '2')
+	{
+		if(!sam_used)
+		{
+			if(open_sam())
+				sam_used = true;
+			else
+			{
+				printf("Error during SAM opened \n");
+				return;
+			}
+		}
+
+		printf("\nEnter page number (0 - 43)\n");
+		scanf("%d%*c", &page_nr_int);
+		page_nr = page_nr_int;
+
+		printf("\nEnter SAM AES key number (0 - 127)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		status = BlockReadSamKey(data, page_nr, T2T_WITH_PWD_AUTH, key_index);
+
+		if(status)
+		{
+			printf("\nPage read failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nPage read successful\n");
+			printf("Data = ");
+			print_hex_ln(data, 4, " ");
+			printf("\n");
+		}
 	}
 	else
-	{
-		printf("\nPage read successful\n");
-		printf("Data = ");
-		print_hex_ln(data, 4, " ");
-		printf("\n");
-	}
+		printf("Wrong choice\n");
 }
 //-----------------------------------------------------------------------------
+
 void page_write(void)
 {
 	UFR_STATUS status;
-	int page_nr_int;
-	uint8_t page_nr;
+	int page_nr_int, key_index_int;
+	uint8_t page_nr, key_index;
 	uint8_t data[16];
+	char key;
 
 	printf(" -------------------------------------------------------------------\n");
 	printf("                        Page data write                             \n");
 	printf(" -------------------------------------------------------------------\n");
 
-	printf("\nEnter page number (2 - 47)\n");
-	scanf("%d%*c", &page_nr_int);
-	page_nr = page_nr_int;
+	printf("\nEnter authentication mode\n"
+			" (1) - No authentication\n"
+			" (2) - SAM AES key authentication\n"
+			);
 
-	printf("\nEnter page data 4 bytes or characters\n");
-	if(!EnterPageData(data))
+	while (!_kbhit())
+			;
+	key = _getch();
+
+	if(key == '1')
 	{
-		printf("\nError while data entry\n");
-		return;
-	}
+		printf("\nEnter page number (2 - 47)\n");
+		scanf("%d%*c", &page_nr_int);
+		page_nr = page_nr_int;
 
-	status = BlockWrite(data, page_nr, T2T_WITHOUT_PWD_AUTH, 0);
+		printf("\nEnter page data 4 bytes or characters\n");
+		if(!EnterPageData(data))
+		{
+			printf("\nError while data entry\n");
+			return;
+		}
 
-	if(status)
-	{
-		printf("\nPage write failed\n");
-		printf("Error code = %02X\n", status);
+		status = BlockWrite(data, page_nr, T2T_WITHOUT_PWD_AUTH, 0);
+
+		if(status)
+		{
+			printf("\nPage write failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+			printf("\nPage write successful\n");
 	}
 	else
-		printf("\nPage write successful\n");
+	{
+		if(!sam_used)
+		{
+			if(open_sam())
+				sam_used = true;
+			else
+			{
+				printf("Error during SAM opened \n");
+				return;
+			}
+		}
+
+		printf("\nEnter page number (2 - 47)\n");
+		scanf("%d%*c", &page_nr_int);
+		page_nr = page_nr_int;
+
+		printf("\nEnter page data 4 bytes or characters\n");
+		if(!EnterPageData(data))
+		{
+			printf("\nError while data entry\n");
+			return;
+		}
+
+		printf("\nEnter SAM AES key number (0 - 127)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		status = BlockWriteSamKey(data, page_nr, T2T_WITH_PWD_AUTH, key_index);
+
+		if(status)
+		{
+			printf("\nPage write failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+			printf("\nPage write successful\n");
+	}
 }
 //---------------------------------------------------------------------------
 void linear_read(void)
 {
 	UFR_STATUS status;
 	uint16_t lin_addr, lin_len, ret_bytes;
-	int lin_addr_int, lin_len_int;
+	uint8_t key_index;
+	int lin_addr_int, lin_len_int, key_index_int;
 	uint8_t data[200];
+	char key;
 
 	printf(" -------------------------------------------------------------------\n");
 	printf("                        Linear read                                 \n");
 	printf(" -------------------------------------------------------------------\n");
 
-	printf("\nEnter linear address (0 - 143)\n");
-	scanf("%d%*c", &lin_addr_int);
-	lin_addr = lin_addr_int;
+	printf("\nEnter authentication mode\n"
+				" (1) - No authentication\n"
+				" (2) - SAM AES key authentication\n"
+				);
 
-	printf("\nEnter number of bytes for read\n");
-	scanf("%d%*c", &lin_len_int);
-	lin_len = lin_len_int;
+	while (!_kbhit())
+			;
+	key = _getch();
 
-	status = LinearRead(data, lin_addr, lin_len, &ret_bytes, T2T_WITHOUT_PWD_AUTH, 0);
-
-	if(status)
+	if(key == '1')
 	{
-		printf("\nLinear read failed\n");
-		printf("Error code = %02X\n", status);
+		printf("\nEnter linear address (0 - 143)\n");
+		scanf("%d%*c", &lin_addr_int);
+		lin_addr = lin_addr_int;
+
+		printf("\nEnter number of bytes for read\n");
+		scanf("%d%*c", &lin_len_int);
+		lin_len = lin_len_int;
+
+		status = LinearRead(data, lin_addr, lin_len, &ret_bytes, T2T_WITHOUT_PWD_AUTH, 0);
+
+		if(status)
+		{
+			printf("\nLinear read failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nLinear read successful\n");
+			printf("Data = ");
+			print_hex_ln(data, ret_bytes, " ");
+			printf("ASCI = %s\n", data);
+		}
+	}
+	else if(key == '2')
+	{
+		if(!sam_used)
+		{
+			if(open_sam())
+				sam_used = true;
+			else
+			{
+				printf("Error during SAM opened \n");
+				return;
+			}
+		}
+
+		printf("\nEnter linear address (0 - 143)\n");
+		scanf("%d%*c", &lin_addr_int);
+		lin_addr = lin_addr_int;
+
+		printf("\nEnter number of bytes for read\n");
+		scanf("%d%*c", &lin_len_int);
+		lin_len = lin_len_int;
+
+		printf("\nEnter SAM AES key number (0 - 127)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		status = LinearReadSamKey(data, lin_addr, lin_len, &ret_bytes, T2T_WITH_PWD_AUTH, key_index);
+
+		if(status)
+		{
+			printf("\nLinear read failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nLinear read successful\n");
+			printf("Data = ");
+			print_hex_ln(data, ret_bytes, " ");
+			printf("ASCI = %s\n", data);
+		}
 	}
 	else
-	{
-		printf("\nLinear read successful\n");
-		printf("Data = ");
-		print_hex_ln(data, ret_bytes, " ");
-		printf("ASCI = %s\n", data);
-	}
+		printf("Wrong choice\n");
 }
 //----------------------------------------------------------------------------------
 void linear_write(void)
 {
 	UFR_STATUS status;
 	uint16_t lin_addr, lin_len, ret_bytes;
-	int lin_addr_int, lin_len_int;
+	uint8_t key_index;
+	int lin_addr_int, key_index_int;
 	uint8_t data[200];
+	char key;
 
 	printf(" -------------------------------------------------------------------\n");
 	printf("                        Linear write                                 \n");
 	printf(" -------------------------------------------------------------------\n");
 
-	printf("\nEnter linear address (0 - 143)\n");
-	scanf("%d%*c", &lin_addr_int);
-	lin_addr = lin_addr_int;
+	printf("\nEnter authentication mode\n"
+				" (1) - No authentication\n"
+				" (2) - SAM AES key authentication\n"
+				);
 
-	printf("\nEnter linear data\n");
-	if(!EnterLinearData(data, &lin_len))
+	while (!_kbhit())
+			;
+	key = _getch();
+
+	if(key == '1')
 	{
-		printf("\nError while data entry\n");
-		return;
+		printf("\nEnter linear address (0 - 143)\n");
+		scanf("%d%*c", &lin_addr_int);
+		lin_addr = lin_addr_int;
+
+		printf("\nEnter linear data\n");
+		if(!EnterLinearData(data, &lin_len))
+		{
+			printf("\nError while data entry\n");
+			return;
+		}
+
+		status = LinearWrite(data, lin_addr, lin_len, &ret_bytes, T2T_WITHOUT_PWD_AUTH, 0);
+
+		if(status)
+		{
+			printf("\nLinear write failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+			printf("\nLinear write successful\n");
 	}
-
-	status = LinearWrite(data, lin_addr, lin_len, &ret_bytes, T2T_WITHOUT_PWD_AUTH, 0);
-
-	if(status)
+	else if(key == '2')
 	{
-		printf("\nLinear write failed\n");
-		printf("Error code = %02X\n", status);
+		if(!sam_used)
+		{
+			if(open_sam())
+				sam_used = true;
+			else
+			{
+				printf("Error during SAM opened \n");
+				return;
+			}
+		}
+
+		printf("\nEnter linear address (0 - 143)\n");
+		scanf("%d%*c", &lin_addr_int);
+		lin_addr = lin_addr_int;
+
+		printf("\nEnter linear data\n");
+		if(!EnterLinearData(data, &lin_len))
+		{
+			printf("\nError while data entry\n");
+			return;
+		}
+
+		printf("\nEnter SAM AES key number (0 - 127)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		status = LinearWriteSamKey(data, lin_addr, lin_len, &ret_bytes, T2T_WITH_PWD_AUTH, key_index);
+
+		if(status)
+		{
+			printf("\nLinear write failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+			printf("\nLinear write successful\n");
 	}
 	else
-		printf("\nLinear write successful\n");
+		printf("Wrong choice\n");
 }
 //----------------------------------------------------------------------------------
 void key_write(void)
@@ -611,5 +859,99 @@ void key_write(void)
 			printf("\nKey write successful\n");
 		break;
 	}
+}
+
+bool open_sam(void)
+{
+	UFR_STATUS status;
+	uint8_t atr_data[50];
+	uint8_t len = 50;
+
+	status = open_ISO7816_interface(atr_data, &len);
+	if(status)
+	{
+		printf("Error code = %02x\n", status);
+		return false;
+	}
+	else
+	{
+		printf("SAM opened\n");
+		return true;
+	}
+}
+
+void SamStoreKey(void)
+{
+    UFR_STATUS status;
+    int key_no_int, key_ver_int;
+    unsigned char key_no;
+    unsigned char key_a[16];
+    unsigned char master_key[16], master_key_ver;
+    unsigned char apdu_sw[2];
+    unsigned char auth_key_no;
+
+    printf(" -------------------------------------------------------------------\n");
+   	printf("                         WRITING KEY INTO SAM                       \n");
+   	printf(" -------------------------------------------------------------------\n");
+
+   	if(!sam_used)
+	{
+		if(open_sam())
+			sam_used = true;
+		else
+		{
+			printf("Error during SAM opened \n");
+			return;
+		}
+	}
+
+	printf("Enter 2K3DES key (16 bytes hexadecimal)\n");
+	if(!Enter3DesKey(key_a))
+	{
+		printf("\nError while key entry\n");
+		return;
+	}
+
+	printf("Enter SAM ordinal key number (0 - 127):\n");
+	scanf("%d%*c", &key_no_int);
+	key_no = key_no_int & 0xFF;
+
+	printf("Enter SAM key for host authentication ordinal number: \n");
+	scanf("%d%*c", &key_no_int);
+	auth_key_no = key_no_int & 0x7F;
+
+	printf("Enter version of host authentication key (0 - 255): \n");
+	scanf("%d%*c", &key_ver_int);
+	master_key_ver = key_ver_int & 0xFF;
+
+	printf("Enter host authentication key: \n");
+	if(!Enter3DesKey(master_key))
+	{
+		printf("\nError while key entry\n");
+		return;
+	}
+
+	status = SAM_authenticate_host_AV2_plain(master_key, auth_key_no, master_key_ver, apdu_sw);
+
+	if(status)
+	{
+		printf("\nHost authentication error\n");
+		printf("Error code = %02X\n", status);
+		return;
+	}
+	else
+		printf("\nHost authentication is OK\n");
+
+
+	status = SAM_change_key_entry_2K3DES_ULC_AV2_plain_one_key(key_no, key_a, auth_key_no, master_key_ver, 0xFF, apdu_sw);
+
+	if(status)
+	{
+		printf("\nChange key entry error\n");
+		printf("Error code = %02X\n", status);
+		return;
+	}
+	else
+		printf("\n2K3DES key stored successfully\n");
 
 }
