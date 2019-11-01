@@ -51,6 +51,7 @@ void linear_write(void);
 void key_write(void);
 bool open_sam(void);
 void SamStoreKey(void);
+void reader_store_key(void);
 //------------------------------------------------------------------------------
 
 bool card_transceive_mode = false;
@@ -236,6 +237,10 @@ void menu(char key)
 			SamStoreKey();
 			break;
 
+		case '9':
+			reader_store_key();
+			break;
+
 		case '\x1b':
 			break;
 
@@ -261,7 +266,8 @@ void usage(void)
 			   "  (5) - Linear Read\n"
 			   "  (6) - Linear Write\n"
 			   "  (7) - Enter 3DES key into card\n"
-			   "  (8) - Writing keys into SAM\n");
+			   "  (8) - Writing keys into SAM\n"
+			   "  (9) - Writing key into reader\n");
 }
 //------------------------------------------------------------------------------
 UFR_STATUS NewCardInField(uint8_t sak, uint8_t *uid, uint8_t uid_size)
@@ -391,7 +397,7 @@ void authentication_3des(void)
 	uint8_t key_3des[16];
 
 	printf(" -------------------------------------------------------------------\n");
-	printf("                        Authentication with 3DES key                    \n");
+	printf("              External authentication with 3DES key                 \n");
 	printf(" -------------------------------------------------------------------\n");
 
 	printf("\nEnter 3DES key (16 hexadecimal numbers)\n");
@@ -438,6 +444,7 @@ void page_read(void)
 	uint8_t page_nr, key_index;
 	uint8_t data[16];
 	char key;
+	uint8_t key_3des[16];
 
 	printf(" -------------------------------------------------------------------\n");
 	printf("                        Page data read                              \n");
@@ -446,6 +453,8 @@ void page_read(void)
 	printf("\nEnter authentication mode\n"
 			" (1) - No authentication\n"
 			" (2) - SAM AES key authentication\n"
+			" (3) - Provided 2K3DES key\n"
+			" (4) - Reader 2K3DES key\n"
 			);
 
 	while (!_kbhit())
@@ -509,6 +518,59 @@ void page_read(void)
 			printf("\n");
 		}
 	}
+	else if(key == '3')
+	{
+		printf("\nEnter 2K3DES key (16 hexadecimal numbers)\n");
+		if(!Enter3DesKey(key_3des))
+		{
+			printf("\nError while key entry\n");
+			return;
+		}
+
+		printf("\nEnter page number (0 - 43)\n");
+		scanf("%d%*c", &page_nr_int);
+		page_nr = page_nr_int;
+
+		status = BlockRead_PK(data, page_nr, MIFARE_PLUS_AES_AUTHENT1A, key_3des);
+
+		if(status)
+		{
+			printf("\nPage read failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nPage read successful\n");
+			printf("Data = ");
+			print_hex_ln(data, 4, " ");
+			printf("\n");
+		}
+	}
+	else if(key == '4')
+	{
+		printf("\nEnter page number (0 - 43)\n");
+		scanf("%d%*c", &page_nr_int);
+		page_nr = page_nr_int;
+
+		printf("\nEnter reader 2K3DES key number (0 - 15)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		status = BlockRead(data, page_nr, T2T_WITH_PWD_AUTH, key_index);
+
+		if(status)
+		{
+			printf("\nPage read failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nPage read successful\n");
+			printf("Data = ");
+			print_hex_ln(data, 4, " ");
+			printf("\n");
+		}
+	}
 	else
 		printf("Wrong choice\n");
 }
@@ -521,6 +583,7 @@ void page_write(void)
 	uint8_t page_nr, key_index;
 	uint8_t data[16];
 	char key;
+	uint8_t key_3des[16];
 
 	printf(" -------------------------------------------------------------------\n");
 	printf("                        Page data write                             \n");
@@ -529,6 +592,8 @@ void page_write(void)
 	printf("\nEnter authentication mode\n"
 			" (1) - No authentication\n"
 			" (2) - SAM AES key authentication\n"
+			" (3) - Provided 2K3DES key\n"
+			" (4) - Reader 2K3DES key\n"
 			);
 
 	while (!_kbhit())
@@ -558,7 +623,7 @@ void page_write(void)
 		else
 			printf("\nPage write successful\n");
 	}
-	else
+	else if(key == '2')
 	{
 		if(!sam_used)
 		{
@@ -596,6 +661,76 @@ void page_write(void)
 		else
 			printf("\nPage write successful\n");
 	}
+	else if(key == '3')
+	{
+		printf("\nEnter 2K3DES key (16 hexadecimal numbers)\n");
+		if(!Enter3DesKey(key_3des))
+		{
+			printf("\nError while key entry\n");
+			return;
+		}
+
+		printf("\nEnter page number (2 - 47)\n");
+		scanf("%d%*c", &page_nr_int);
+		page_nr = page_nr_int;
+
+		printf("\nEnter page data 4 bytes or characters\n");
+		if(!EnterPageData(data))
+		{
+			printf("\nError while data entry\n");
+			return;
+		}
+
+		status = BlockWrite_PK(data, page_nr, MIFARE_PLUS_AES_AUTHENT1A, key_3des);
+
+		if(status)
+		{
+			printf("\nPage write failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nPage write successful\n");
+			printf("Data = ");
+			print_hex_ln(data, 4, " ");
+			printf("\n");
+		}
+	}
+	else if(key == '4')
+	{
+		printf("\nEnter page number (2 - 47)\n");
+		scanf("%d%*c", &page_nr_int);
+		page_nr = page_nr_int;
+
+		printf("\nEnter reader 2K3DES key number (0 - 15)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		printf("\nEnter page data 4 bytes or characters\n");
+		if(!EnterPageData(data))
+		{
+			printf("\nError while data entry\n");
+			return;
+		}
+
+		status = BlockWrite(data, page_nr, T2T_WITH_PWD_AUTH, key_index);
+
+		if(status)
+		{
+			printf("\nPage write failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nPage write successful\n");
+			printf("Data = ");
+			print_hex_ln(data, 4, " ");
+			printf("\n");
+		}
+	}
+	else
+		printf("Wrong choice\n");
+
 }
 //---------------------------------------------------------------------------
 void linear_read(void)
@@ -606,6 +741,7 @@ void linear_read(void)
 	int lin_addr_int, lin_len_int, key_index_int;
 	uint8_t data[200];
 	char key;
+	uint8_t key_3des[16];
 
 	printf(" -------------------------------------------------------------------\n");
 	printf("                        Linear read                                 \n");
@@ -614,6 +750,8 @@ void linear_read(void)
 	printf("\nEnter authentication mode\n"
 				" (1) - No authentication\n"
 				" (2) - SAM AES key authentication\n"
+				" (3) - Provided 2K3DES key\n"
+				" (4) - Reader 2K3DES key\n"
 				);
 
 	while (!_kbhit())
@@ -685,6 +823,67 @@ void linear_read(void)
 			printf("ASCI = %s\n", data);
 		}
 	}
+	else if(key == '3')
+	{
+		printf("\nEnter linear address (0 - 143)\n");
+		scanf("%d%*c", &lin_addr_int);
+		lin_addr = lin_addr_int;
+
+		printf("\nEnter number of bytes for read\n");
+		scanf("%d%*c", &lin_len_int);
+		lin_len = lin_len_int;
+
+		printf("\nEnter 2K3DES key (16 hexadecimal numbers)\n");
+		if(!Enter3DesKey(key_3des))
+		{
+			printf("\nError while key entry\n");
+			return;
+		}
+
+		status = LinearRead_PK(data, lin_addr, lin_len, &ret_bytes, MIFARE_PLUS_AES_AUTHENT1A, key_3des);
+
+		if(status)
+		{
+			printf("\nLinear read failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nLinear read successful\n");
+			printf("Data = ");
+			print_hex_ln(data, ret_bytes, " ");
+			printf("ASCI = %s\n", data);
+		}
+	}
+	else if(key == '4')
+	{
+		printf("\nEnter linear address (0 - 143)\n");
+		scanf("%d%*c", &lin_addr_int);
+		lin_addr = lin_addr_int;
+
+		printf("\nEnter number of bytes for read\n");
+		scanf("%d%*c", &lin_len_int);
+		lin_len = lin_len_int;
+
+		printf("\nEnter reader 2K3DES key number (0 - 15)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		status = LinearRead(data, lin_addr, lin_len, &ret_bytes, T2T_WITH_PWD_AUTH, key_index);
+
+		if(status)
+		{
+			printf("\nLinear read failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nLinear read successful\n");
+			printf("Data = ");
+			print_hex_ln(data, ret_bytes, " ");
+			printf("ASCI = %s\n", data);
+		}
+	}
 	else
 		printf("Wrong choice\n");
 }
@@ -697,6 +896,7 @@ void linear_write(void)
 	int lin_addr_int, key_index_int;
 	uint8_t data[200];
 	char key;
+	uint8_t key_3des[16];
 
 	printf(" -------------------------------------------------------------------\n");
 	printf("                        Linear write                                 \n");
@@ -705,6 +905,8 @@ void linear_write(void)
 	printf("\nEnter authentication mode\n"
 				" (1) - No authentication\n"
 				" (2) - SAM AES key authentication\n"
+				" (3) - Provided 2K3DES key\n"
+				" (4) - Reader 2K3DES key\n"
 				);
 
 	while (!_kbhit())
@@ -771,6 +973,73 @@ void linear_write(void)
 		}
 		else
 			printf("\nLinear write successful\n");
+	}
+	else if(key == '3')
+	{
+		printf("\nEnter linear address (0 - 143)\n");
+		scanf("%d%*c", &lin_addr_int);
+		lin_addr = lin_addr_int;
+
+		printf("\nEnter linear data\n");
+		if(!EnterLinearData(data, &lin_len))
+		{
+			printf("\nError while data entry\n");
+			return;
+		}
+
+		printf("\nEnter 3DES key (16 hexadecimal numbers)\n");
+		if(!Enter3DesKey(key_3des))
+		{
+			printf("\nError while key entry\n");
+			return;
+		}
+
+		status = LinearWrite_PK(data, lin_addr, lin_len, &ret_bytes, MIFARE_PLUS_AES_AUTHENT1A, key_3des);
+
+		if(status)
+		{
+			printf("\nLinear write failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nLinear write successful\n");
+			printf("Data = ");
+			print_hex_ln(data, ret_bytes, " ");
+			printf("ASCI = %s\n", data);
+		}
+	}
+	else if(key == '4')
+	{
+		printf("\nEnter linear address (0 - 143)\n");
+		scanf("%d%*c", &lin_addr_int);
+		lin_addr = lin_addr_int;
+
+		printf("\nEnter linear data\n");
+		if(!EnterLinearData(data, &lin_len))
+		{
+			printf("\nError while data entry\n");
+			return;
+		}
+
+		printf("\nEnter reader AES key number (0 - 15)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		status = LinearWrite(data, lin_addr, lin_len, &ret_bytes, T2T_WITH_PWD_AUTH, key_index);
+
+		if(status)
+		{
+			printf("\nLinear write failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+		{
+			printf("\nLinear write successful\n");
+			printf("Data = ");
+			print_hex_ln(data, ret_bytes, " ");
+			printf("ASCI = %s\n", data);
+		}
 	}
 	else
 		printf("Wrong choice\n");
@@ -954,4 +1223,100 @@ void SamStoreKey(void)
 	else
 		printf("\n2K3DES key stored successfully\n");
 
+}
+
+void reader_store_key(void)
+{
+	printf(" -------------------------------------------------------------------\n");
+	printf("                	WRITING KEY INTO READER                        \n");
+	printf(" -------------------------------------------------------------------\n");
+
+	UFR_STATUS status;
+	uint8_t des2k_key[16], password[16], key_index;
+	uint16_t pass_len;
+	char key;
+	int key_index_int;
+
+	printf(" (1) - CRIPTO 1 keys \n"
+		   " (2) - AES keys \n"
+		   " (3) - Unlock reader \n"
+		   " (4) - Lock reader \n");
+	while (!_kbhit())
+		;
+	key = _getch();
+
+	if(key == '2')
+	{
+		printf("Enter 2K3DES key (16 bytes hexadecimal)\n");
+		if(!Enter3DesKey(des2k_key))
+		{
+			printf("\nError while key entry\n");
+			return;
+		}
+
+		printf("\nEnter key index (0 - 15)\n");
+		scanf("%d%*c", &key_index_int);
+		key_index = key_index_int;
+
+		status = uFR_int_DesfireWriteKey(key_index, des2k_key, 3); //2K3DES type = 3
+		if(status)
+		{
+			printf("\nWriting key into reader failed\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+			printf("\nKey written into reader\n");
+	}
+	else if(key == '3')
+	{
+		printf("\nEnter password of 8 bytes\n");
+
+		if(!EnterLinearData(password, &pass_len))
+		{
+			printf("\nError while password entry\n");
+			return;
+		}
+		if(pass_len != 8)
+		{
+			printf("\nPassword length is wrong\n");
+			return;
+		}
+
+		status = ReaderKeysUnlock(password);
+		if(status)
+		{
+			printf("\nUnlock keys error\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+			printf("\nReader keys are unlocked\n");
+	}
+	else if(key == '4')
+	{
+		printf("\nEnter password of 8 bytes\n");
+
+		if(!EnterLinearData(password, &pass_len))
+		{
+			printf("\nError while password entry\n");
+			return;
+		}
+		if(pass_len != 8)
+		{
+			printf("\nPassword length is wrong\n");
+			return;
+		}
+
+		status = ReaderKeysLock(password);
+		if(status)
+		{
+			printf("\nLock keys error\n");
+			printf("Error code = %02X\n", status);
+		}
+		else
+			printf("\nReader keys are locked\n");
+	}
+	else
+		printf("\nWrong choice\n");
+
+	return;
 }
